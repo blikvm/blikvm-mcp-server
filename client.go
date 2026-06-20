@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,6 +22,7 @@ type Client struct {
 }
 
 // NewClient 创建一个新的 blikvm API 客户端。
+// 注意：跳过 TLS 证书验证，适用于内部网络环境。
 func NewClient(baseURL, username, password string) *Client {
 	return &Client{
 		baseURL:  baseURL,
@@ -28,6 +30,11 @@ func NewClient(baseURL, username, password string) *Client {
 		password: password,
 		http: &http.Client{
 			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: true, // 跳过证书验证
+				},
+			},
 		},
 	}
 }
@@ -204,6 +211,25 @@ func (c *Client) KeyPress(ctx context.Context, key string, pressed bool) error {
 	})
 }
 
+// Hotkey 使用 paste API 同时按下一组键（组合键）。
+// keys 为要同时按下的 HID 键码列表，如 ["ControlLeft", "KeyA"]。
+func (c *Client) Hotkey(ctx context.Context, keys []string) error {
+	if len(keys) == 0 {
+		return fmt.Errorf("empty keys")
+	}
+	payload, _ := json.Marshal(pasteRequest{Sequence: [][]string{keys}})
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/hid/paste", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("hotkey failed: HTTP %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
 // pasteRequest 是 /api/v1/hid/paste 的请求体。
 type pasteRequest struct {
 	Sequence [][]string `json:"sequence"`
@@ -236,43 +262,66 @@ func (c *Client) TypeText(ctx context.Context, text string) error {
 	return nil
 }
 
+// charToHIDKey 将单个字符映射到 blikvm 支持的标准 HID 键码。
+// 返回键码和是否需要 Shift。
+var charToHIDKey = map[string]struct {
+	code  string
+	shift bool
+}{
+	"a": {"KeyA", false}, "b": {"KeyB", false}, "c": {"KeyC", false},
+	"d": {"KeyD", false}, "e": {"KeyE", false}, "f": {"KeyF", false},
+	"g": {"KeyG", false}, "h": {"KeyH", false}, "i": {"KeyI", false},
+	"j": {"KeyJ", false}, "k": {"KeyK", false}, "l": {"KeyL", false},
+	"m": {"KeyM", false}, "n": {"KeyN", false}, "o": {"KeyO", false},
+	"p": {"KeyP", false}, "q": {"KeyQ", false}, "r": {"KeyR", false},
+	"s": {"KeyS", false}, "t": {"KeyT", false}, "u": {"KeyU", false},
+	"v": {"KeyV", false}, "w": {"KeyW", false}, "x": {"KeyX", false},
+	"y": {"KeyY", false}, "z": {"KeyZ", false},
+	"A": {"KeyA", true}, "B": {"KeyB", true}, "C": {"KeyC", true},
+	"D": {"KeyD", true}, "E": {"KeyE", true}, "F": {"KeyF", true},
+	"G": {"KeyG", true}, "H": {"KeyH", true}, "I": {"KeyI", true},
+	"J": {"KeyJ", true}, "K": {"KeyK", true}, "L": {"KeyL", true},
+	"M": {"KeyM", true}, "N": {"KeyN", true}, "O": {"KeyO", true},
+	"P": {"KeyP", true}, "Q": {"KeyQ", true}, "R": {"KeyR", true},
+	"S": {"KeyS", true}, "T": {"KeyT", true}, "U": {"KeyU", true},
+	"V": {"KeyV", true}, "W": {"KeyW", true}, "X": {"KeyX", true},
+	"Y": {"KeyY", true}, "Z": {"KeyZ", true},
+	"1": {"Digit1", false}, "2": {"Digit2", false}, "3": {"Digit3", false},
+	"4": {"Digit4", false}, "5": {"Digit5", false}, "6": {"Digit6", false},
+	"7": {"Digit7", false}, "8": {"Digit8", false}, "9": {"Digit9", false},
+	"0": {"Digit0", false},
+	" ": {"Space", false},
+	"-": {"Minus", false}, "=": {"Equal", false},
+	"[": {"BracketLeft", false}, "]": {"BracketRight", false},
+	"\\": {"Backslash", false}, ";": {"Semicolon", false},
+	"'": {"Quote", false}, ",": {"Comma", false},
+	".": {"Period", false}, "/": {"Slash", false},
+	"`": {"Backquote", false},
+	"!": {"Digit1", true}, "@": {"Digit2", true}, "#": {"Digit3", true},
+	"$": {"Digit4", true}, "%": {"Digit5", true}, "^": {"Digit6", true},
+	"&": {"Digit7", true}, "*": {"Digit8", true}, "(": {"Digit9", true},
+	")": {"Digit0", true},
+	"_": {"Minus", true}, "+": {"Equal", true},
+	"{": {"BracketLeft", true}, "}": {"BracketRight", true},
+	"|": {"Backslash", true}, ":": {"Semicolon", true},
+	"\"": {"Quote", true}, "<": {"Comma", true},
+	">": {"Period", true}, "?": {"Slash", true},
+	"~": {"Backquote", true},
+}
+
 // buildPasteSequence 将文本转换为 paste API 可接受的 HID 键码序列。
-// 对于可打印 ASCII 字符，直接使用字符本身作为 key code（blikvm 支持单字符 key）。
-// 对于需要 Shift 的符号（如 !@#$%^&*()），使用 ["Shift", 字符] 组合。
 func buildPasteSequence(text string) [][]string {
 	var seq [][]string
 	for _, r := range text {
 		s := string(r)
-		if shiftKeys, ok := shiftMap[s]; ok {
-			seq = append(seq, shiftKeys)
-		} else {
-			seq = append(seq, []string{s})
+		if info, ok := charToHIDKey[s]; ok {
+			if info.shift {
+				seq = append(seq, []string{"ShiftLeft", info.code})
+			} else {
+				seq = append(seq, []string{info.code})
+			}
 		}
+		// 不支持的字符直接跳过
 	}
 	return seq
-}
-
-// shiftMap 映射需要 Shift 键的符号到键码组合。
-var shiftMap = map[string][]string{
-	"!": {"Shift", "1"},
-	"@": {"Shift", "2"},
-	"#": {"Shift", "3"},
-	"$": {"Shift", "4"},
-	"%": {"Shift", "5"},
-	"^": {"Shift", "6"},
-	"&": {"Shift", "7"},
-	"*": {"Shift", "8"},
-	"(": {"Shift", "9"},
-	")": {"Shift", "0"},
-	"_": {"Shift", "-"},
-	"+": {"Shift", "="},
-	"{": {"Shift", "["},
-	"}": {"Shift", "]"},
-	"|": {"Shift", "\\"},
-	":": {"Shift", ";"},
-	"\"": {"Shift", "'"},
-	"<": {"Shift", ","},
-	">": {"Shift", "."},
-	"?": {"Shift", "/"},
-	"~": {"Shift", "`"},
 }

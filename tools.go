@@ -2,13 +2,30 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
+
+// screenshotDir 是截图保存目录，可通过环境变量 BLIKVM_SCREENSHOT_DIR 自定义。
+var screenshotDir = getScreenshotDir()
+
+func getScreenshotDir() string {
+	dir := os.Getenv("BLIKVM_SCREENSHOT_DIR")
+	if dir == "" {
+		dir = "/tmp/blikvm-mcp/screenshots"
+	}
+	// 确保目录存在
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		// 如果创建失败，回退到 /tmp
+		dir = "/tmp"
+	}
+	return dir
+}
 
 // registerTools 注册所有 MCP 工具到给定的 MCP server。
 func registerTools(s *server.MCPServer, client *Client) {
@@ -40,7 +57,7 @@ func getArg(req mcp.CallToolRequest, key string) (any, bool) {
 func registerScreenshot(s *server.MCPServer, client *Client) {
 	tool := mcp.NewTool("blikvm_screenshot",
 		mcp.WithDescription("Take a screenshot of the remote screen controlled by BliKVM. "+
-			"Returns the screenshot as a base64-encoded JPEG image. "+
+			"Saves the screenshot as a JPEG file and returns the file path. "+
 			"Use this to see the current state of the remote display before performing mouse or keyboard actions."),
 	)
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -48,8 +65,19 @@ func registerScreenshot(s *server.MCPServer, client *Client) {
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("screenshot failed: %v", err)), nil
 		}
-		b64 := base64.StdEncoding.EncodeToString(jpeg)
-		return mcp.NewToolResultImage("Screenshot captured", b64, "image/jpeg"), nil
+
+		// 生成文件名：screenshot_YYYYMMDD_HHMMSS.jpg
+		filename := fmt.Sprintf("screenshot_%s.jpg", time.Now().Format("20060102_150405"))
+		filePath := filepath.Join(screenshotDir, filename)
+
+		// 写入文件
+		if err := os.WriteFile(filePath, jpeg, 0644); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("save screenshot failed: %v", err)), nil
+		}
+
+		// 返回文件路径信息
+		msg := fmt.Sprintf("Screenshot saved to: %s\nFile size: %d bytes", filePath, len(jpeg))
+		return mcp.NewToolResultText(msg), nil
 	})
 }
 
@@ -345,26 +373,9 @@ func registerKeyHotkey(s *server.MCPServer, client *Client) {
 			return mcp.NewToolResultError("no valid keys provided"), nil
 		}
 
-		// 依次按下所有键
-		for _, k := range keys {
-			if err := client.KeyPress(ctx, k, true); err != nil {
-				// 释放已按下的键
-				for _, pressed := range keys {
-					_ = client.KeyPress(ctx, pressed, false)
-				}
-				return mcp.NewToolResultError(fmt.Sprintf("press key %s failed: %v", k, err)), nil
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
-
-		time.Sleep(50 * time.Millisecond)
-
-		// 反向释放所有键
-		for i := len(keys) - 1; i >= 0; i-- {
-			if err := client.KeyPress(ctx, keys[i], false); err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("release key %s failed: %v", keys[i], err)), nil
-			}
-			time.Sleep(20 * time.Millisecond)
+		// 使用 paste API 同时按下一组键
+		if err := client.Hotkey(ctx, keys); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("hotkey failed: %v", err)), nil
 		}
 
 		return mcp.NewToolResultText(fmt.Sprintf("Pressed hotkey: %v", keys)), nil
