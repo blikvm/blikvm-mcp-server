@@ -1,65 +1,67 @@
 # blikvm-mcp-server
 
-一个 MCP (Model Context Protocol) 服务器，将 BliKVM 的截图和键鼠控制能力暴露为 MCP 工具，让 AI agent 可以通过 MCP 协议远程控制被控 PC。
+[中文文档](README.zh.md)
 
-## 功能
+An MCP (Model Context Protocol) server that exposes BliKVM's screenshot and HID (keyboard/mouse) control capabilities as MCP tools, enabling AI agents to remotely observe and control the target PC through the MCP protocol.
 
-将 BliKVM Web Server 的 REST API 封装为标准 MCP 工具，供任何支持 MCP 的客户端（如 Trae IDE、Claude Desktop 等）调用。
+## Features
 
-### 提供的 MCP 工具
+Wraps BliKVM Web Server REST APIs into standard MCP tools for any MCP-compatible client (Trae IDE, Claude Desktop, etc.).
 
-| 工具名 | 功能 |
-|--------|------|
-| `blikvm_screenshot` | 截取远程屏幕，返回 JPEG 图片 |
-| `blikvm_mouse_move` | 移动鼠标到归一化坐标 (x, y ∈ [0,1]) |
-| `blikvm_mouse_click` | 单击鼠标按钮（left/right/middle，可选先移动） |
-| `blikvm_mouse_double_click` | 双击鼠标 |
-| `blikvm_mouse_drag` | 从一点拖拽到另一点 |
-| `blikvm_mouse_scroll` | 滚动鼠标滚轮 |
-| `blikvm_key_tap` | 按下并释放单个键盘键 |
-| `blikvm_key_hotkey` | 按下组合键（如 Ctrl+C、Ctrl+Shift+V） |
-| `blikvm_type_text` | 通过键盘输入文本字符串 |
+### Provided MCP Tools
 
-## 编译
+| Tool | Function |
+|------|----------|
+| `blikvm_screenshot` | Capture remote screen and return JPEG image |
+| `blikvm_mouse_move` | Move mouse to normalized coordinates (x, y ∈ [0,1]) |
+| `blikvm_mouse_click` | Click mouse button (left/right/middle, optional move first) |
+| `blikvm_mouse_double_click` | Double-click mouse |
+| `blikvm_mouse_drag` | Drag from one point to another |
+| `blikvm_mouse_scroll` | Scroll mouse wheel |
+| `blikvm_key_tap` | Press and release a single keyboard key |
+| `blikvm_key_hotkey` | Press keyboard shortcut (e.g. Ctrl+C, Ctrl+Shift+V) |
+| `blikvm_type_text` | Type text string via keyboard |
 
-### 本机编译
+## Build
+
+### Native Build
 
 ```bash
 cd blikvm-mcp-server
 go build -o blikvm-mcp-server
 ```
 
-### 交叉编译到 rk3566 (Buildroot 工具链)
+### Cross-Compile for rk3566 (Buildroot Toolchain)
 
-BliKVM 的目标设备基于 Rockchip RK3566 (ARM64)，运行 Buildroot 构建的 Linux 系统。本仓库为纯 Go 实现（无 cgo 依赖），因此交叉编译非常简单，无需 C 工具链。
+BliKVM targets Rockchip RK3566 (ARM64) devices running Buildroot Linux. This project is pure Go (no cgo), so cross-compilation is straightforward without a C toolchain.
 
-#### 方式一：直接使用 Go 交叉编译（推荐）
+#### Method 1: Direct Go Cross-Compilation (Recommended)
 
-由于本项目不依赖 cgo，可直接用 Go 的内置交叉编译能力：
+Since this project has no cgo dependency, use Go's built-in cross-compilation:
 
 ```bash
 cd blikvm-mcp-server
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o blikvm-mcp-server ./...
 ```
 
-产物 `blikvm-mcp-server` 即为可在 rk3566 设备上运行的 ARM64 二进制。
+The output `blikvm-mcp-server` is an ARM64 binary ready to run on rk3566 devices.
 
-#### 方式二：使用 Buildroot 工具链（如需 cgo）
+#### Method 2: Using Buildroot Toolchain (if cgo needed)
 
-如果你有 Buildroot SDK（例如从 `/path/to/buildroot` 构建得到），可以使用其生成的工具链：
+If you have a Buildroot SDK (e.g. from `/path/to/buildroot`):
 
 ```bash
-# 设置 Buildroot 工具链路径
+# Set Buildroot toolchain path
 export PATH="/path/to/buildroot/output/rockchip_rk3566/host/bin:$PATH"
 export CC=/path/to/buildroot/output/rockchip_rk3566/host/bin/aarch64-buildroot-linux-gnu-gcc
 export CXX=/path/to/buildroot/output/rockchip_rk3566/host/bin/aarch64-buildroot-linux-gnu-g++
 
-# 交叉编译
+# Cross-compile
 cd blikvm-mcp-server
 CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC=$CC go build -o blikvm-mcp-server ./...
 ```
 
-#### 实际示例
+#### Practical Example
 
 ```bash
 export PATH="/home/blikvm/.local/go/bin:$PATH"
@@ -70,39 +72,39 @@ cd /home/blikvm/Downloads/blikvm-release/dist/work/sources/blikvm-mcp-server
 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o blikvm-mcp-server ./...
 ```
 
-#### 验证产物架构
+#### Verify Output Architecture
 
 ```bash
 file blikvm-mcp-server
-# 预期输出类似：ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, ...
+# Expected: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, ...
 ```
 
-### 部署到设备
+### Deploy to Device
 
-将编译好的二进制通过 scp 或其他方式传到 BliKVM 设备：
+Copy the binary to the BliKVM device via scp:
 
 ```bash
 scp blikvm-mcp-server root@<blikvm-ip>:/usr/local/bin/
 ssh root@<blikvm-ip> "chmod +x /usr/local/bin/blikvm-mcp-server"
 ```
 
-## 使用方式
+## Usage
 
-### 命令行参数
+### Command Line Arguments
 
 ```bash
 ./blikvm-mcp-server -url http://<blikvm-ip> -username <user> -password <pass>
 ```
 
-| 参数 | 说明 |
-|------|------|
-| `-url` | BliKVM Web Server 地址，例如 `http://192.168.1.100` |
-| `-username` | 登录用户名 |
-| `-password` | 登录密码 |
+| Argument | Description |
+|----------|-------------|
+| `-url` | BliKVM Web Server address, e.g. `http://192.168.1.100` |
+| `-username` | Login username |
+| `-password` | Login password |
 
-### 环境变量
+### Environment Variables
 
-也可通过环境变量配置（优先级低于命令行参数）：
+Alternatively, use environment variables (lower priority than CLI args):
 
 ```bash
 export BLIKVM_URL=http://192.168.1.100
@@ -111,10 +113,12 @@ export BLIKVM_PASSWORD=yourpass
 ./blikvm-mcp-server
 ```
 
-### 在 Trae IDE 中配置
+### Configure in Trae IDE
 
-在 Trae 的设置 → MCP Servers 中添加：
-方案 1：在本地运行 MCP server，连接远程 blikvm
+Add to Trae Settings → MCP Servers:
+
+#### Option 1: Run MCP server locally, connect to remote blikvm
+
 ```json
 {
   "mcpServers": {
@@ -128,22 +132,11 @@ export BLIKVM_PASSWORD=yourpass
     }
   }
 }
+```
 
-{
-  "mcpServers": {
-    "blikvm": {
-      "command": "/home/blikvm/Downloads/blikvm-release/dist/work/sources/blikvm-mcp-server/blikvm-mcp-server",
-      "args": [
-        "-url", "https://10.0.0.10",
-        "-username", "admin",
-        "-password", "admin"
-      ]
-    }
-  }
-}
-```
-```
-方案 2：SSH 远程启动
+#### Option 2: SSH remote launch
+
+```json
 {
   "mcpServers": {
     "blikvm": {
@@ -160,9 +153,9 @@ export BLIKVM_PASSWORD=yourpass
 }
 ```
 
-### 在 Claude Desktop 中配置
+### Configure in Claude Desktop
 
-编辑 `claude_desktop_config.json`：
+Edit `claude_desktop_config.json`:
 
 ```json
 {
@@ -179,18 +172,18 @@ export BLIKVM_PASSWORD=yourpass
 }
 ```
 
-配置完成后，AI agent 即可直接调用 `blikvm_screenshot`、`blikvm_mouse_click` 等工具来观察并控制远程 PC。
+After configuration, the AI agent can directly call `blikvm_screenshot`, `blikvm_mouse_click`, etc. to observe and control the remote PC.
 
-## 工作原理
+## How It Works
 
-1. 启动时使用用户名/密码调用 `/api/v1/auth/login` 获取 Bearer token
-2. 后续所有请求都带上 `Authorization: Bearer <token>`
-3. 遇到 401 时自动重新登录并重试一次
-4. 通过 stdio 与 MCP 客户端通信（标准 MCP 传输方式）
+1. On startup, calls `/api/v1/auth/login` with username/password to obtain a Bearer token
+2. All subsequent requests include `Authorization: Bearer <token>`
+3. On 401 responses, automatically re-authenticates and retries once
+4. Communicates with the MCP client via stdio (standard MCP transport)
 
-### 调用的 BliKVM API
+### BliKVM APIs Used
 
-| MCP 工具 | BliKVM API |
+| MCP Tool | BliKVM API |
 |----------|-----------|
 | `blikvm_screenshot` | `GET /api/v1/video/snapshot` |
 | `blikvm_mouse_move` | `POST /api/v1/hid/events` (type=mouseMove) |
@@ -198,29 +191,29 @@ export BLIKVM_PASSWORD=yourpass
 | `blikvm_mouse_drag` | `POST /api/v1/hid/events` (type=mouseMove + mouseButton) |
 | `blikvm_mouse_scroll` | `POST /api/v1/hid/events` (type=mouseWheel) |
 | `blikvm_key_tap` | `POST /api/v1/hid/events` (type=keyboard) |
-| `blikvm_key_hotkey` | `POST /api/v1/hid/events` (type=keyboard) |
+| `blikvm_key_hotkey` | `POST /api/v1/hid/paste` |
 | `blikvm_type_text` | `POST /api/v1/hid/paste` |
 
-## 坐标系统
+## Coordinate System
 
-鼠标坐标使用 **归一化绝对坐标**，范围 `[0.0, 1.0]`：
-- `(0, 0)` = 屏幕左上角
-- `(1, 1)` = 屏幕右下角
-- `(0.5, 0.5)` = 屏幕中心
+Mouse coordinates use **normalized absolute coordinates**, range `[0.0, 1.0]`:
+- `(0, 0)` = top-left corner
+- `(1, 1)` = bottom-right corner
+- `(0.5, 0.5)` = screen center
 
-AI agent 应先调用 `blikvm_screenshot` 查看屏幕，再根据截图估算目标位置的归一化坐标。
+The AI agent should first call `blikvm_screenshot` to see the screen, then estimate the normalized coordinates of the target position.
 
-## 项目结构
+## Project Structure
 
 ```
 blikvm-mcp-server/
-├── main.go       # 入口：解析参数，启动 stdio MCP server
-├── client.go     # BliKVM REST API 客户端（登录/截图/键鼠）
-├── tools.go      # 9 个 MCP 工具定义
+├── main.go       # Entry: parse args, start stdio MCP server
+├── client.go     # BliKVM REST API client (login/screenshot/HID)
+├── tools.go      # 9 MCP tool definitions
 ├── go.mod
 └── README.md
 ```
 
-## 许可证
+## License
 
-同 BliKVM 主项目。
+Same as the BliKVM main project.
