@@ -1,0 +1,15 @@
+# Binary
+blikvm-mcp-server
+
+# Go workspace
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
