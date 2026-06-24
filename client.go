@@ -211,6 +211,146 @@ func (c *Client) KeyPress(ctx context.Context, key string, pressed bool) error {
 	})
 }
 
+// ============================================================================
+// ATX 电源控制
+// ============================================================================
+
+// ATXStatus 是 /api/v1/atx 的响应数据。
+type ATXStatus struct {
+	IsActive bool `json:"isActive"`
+	LedPwr   bool `json:"ledPwr"`
+	LedHDD   bool `json:"ledHDD"`
+}
+
+// GetATXStatus 获取 ATX 电源和 LED 状态。
+func (c *Client) GetATXStatus(ctx context.Context) (*ATXStatus, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/atx", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("get atx status failed: HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		OK   bool      `json:"ok"`
+		Data ATXStatus `json:"data"`
+		Error string   `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("parse atx status failed: %w", err)
+	}
+	if !result.OK {
+		return nil, fmt.Errorf("get atx status failed: %s", result.Error)
+	}
+	return &result.Data, nil
+}
+
+// ATXPowerControl 控制被控主机电源。action: power/force_off/reset_hard。
+func (c *Client) ATXPowerControl(ctx context.Context, action string) error {
+	payload, _ := json.Marshal(map[string]string{"type": action})
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/atx/power", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("atx power control failed: HTTP %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// ============================================================================
+// BIOS 进入辅助
+// ============================================================================
+
+// BiosModeState 是 /api/v1/atx/bios/status 的响应数据。
+type BiosModeState struct {
+	Active       bool   `json:"active"`
+	Key          string `json:"key"`
+	IntervalMs   int    `json:"intervalMs"`
+	RemainingSec int    `json:"remainingSeconds"`
+}
+
+// StartBiosMode 开始 BIOS 模式，周期性发送指定按键。
+func (c *Client) StartBiosMode(ctx context.Context, key string, intervalMs, durationSec int) (*BiosModeState, error) {
+	payload, _ := json.Marshal(map[string]any{
+		"key":      key,
+		"interval": intervalMs,
+		"duration": durationSec,
+	})
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/atx/bios/start", bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("start bios mode failed: HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		OK    bool          `json:"ok"`
+		Data  BiosModeState `json:"data"`
+		Error string        `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("parse bios start response failed: %w", err)
+	}
+	if !result.OK {
+		return nil, fmt.Errorf("start bios mode failed: %s", result.Error)
+	}
+	return &result.Data, nil
+}
+
+// StopBiosMode 停止 BIOS 模式。
+func (c *Client) StopBiosMode(ctx context.Context) error {
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/atx/bios/stop", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("stop bios mode failed: HTTP %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// GetBiosModeStatus 获取 BIOS 模式状态。
+func (c *Client) GetBiosModeStatus(ctx context.Context) (*BiosModeState, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/atx/bios/status", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("get bios status failed: HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		OK    bool          `json:"ok"`
+		Data  BiosModeState `json:"data"`
+		Error string        `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("parse bios status failed: %w", err)
+	}
+	if !result.OK {
+		return nil, fmt.Errorf("get bios status failed: %s", result.Error)
+	}
+	return &result.Data, nil
+}
+
 // Hotkey 使用 paste API 同时按下一组键（组合键）。
 // keys 为要同时按下的 HID 键码列表，如 ["ControlLeft", "KeyA"]。
 func (c *Client) Hotkey(ctx context.Context, keys []string) error {
