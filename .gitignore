@@ -1,5 +1,8 @@
 # Binary
 blikvm-mcp-server
+blikvm-mcp-server-darwin-arm64
+blikvm-mcp-server-darwin-amd64
+blikvm-mcp-server-windows-amd64.exe
 
 # Go workspace
 vendor/
