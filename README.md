@@ -21,6 +21,11 @@ Wraps BliKVM Web Server REST APIs into standard MCP tools for any MCP-compatible
 | `blikvm_key_tap` | Press and release a single keyboard key |
 | `blikvm_key_hotkey` | Press keyboard shortcut (e.g. Ctrl+C, Ctrl+Shift+V) |
 | `blikvm_type_text` | Type text string via keyboard |
+| `blikvm_atx_power_control` | Control remote host power (power/force_off/reset_hard) |
+| `blikvm_atx_get_status` | Get ATX power and LED status |
+| `blikvm_bios_start` | Start BIOS access mode (periodic key sending) |
+| `blikvm_bios_stop` | Stop BIOS access mode |
+| `blikvm_bios_get_status` | Get BIOS access mode status |
 
 ## Build
 
@@ -29,6 +34,23 @@ Wraps BliKVM Web Server REST APIs into standard MCP tools for any MCP-compatible
 ```bash
 cd blikvm-mcp-server
 go build -o blikvm-mcp-server
+```
+
+### Cross-Compile for macOS
+
+```bash
+# macOS ARM64 (Apple Silicon)
+GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o blikvm-mcp-server-darwin-arm64 ./...
+
+# macOS AMD64 (Intel)
+GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -o blikvm-mcp-server-darwin-amd64 ./...
+```
+
+### Cross-Compile for Windows
+
+```bash
+# Windows AMD64
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o blikvm-mcp-server-windows-amd64.exe ./...
 ```
 
 ### Cross-Compile for rk3566 (Buildroot Toolchain)
@@ -193,6 +215,11 @@ After configuration, the AI agent can directly call `blikvm_screenshot`, `blikvm
 | `blikvm_key_tap` | `POST /api/v1/hid/events` (type=keyboard) |
 | `blikvm_key_hotkey` | `POST /api/v1/hid/paste` |
 | `blikvm_type_text` | `POST /api/v1/hid/paste` |
+| `blikvm_atx_power_control` | `POST /api/v1/atx/power` |
+| `blikvm_atx_get_status` | `GET /api/v1/atx` |
+| `blikvm_bios_start` | `POST /api/v1/atx/bios/start` |
+| `blikvm_bios_stop` | `POST /api/v1/atx/bios/stop` |
+| `blikvm_bios_get_status` | `GET /api/v1/atx/bios/status` |
 
 ## Coordinate System
 
@@ -208,8 +235,8 @@ The AI agent should first call `blikvm_screenshot` to see the screen, then estim
 ```
 blikvm-mcp-server/
 ├── main.go       # Entry: parse args, start stdio MCP server
-├── client.go     # BliKVM REST API client (login/screenshot/HID)
-├── tools.go      # 9 MCP tool definitions
+├── client.go     # BliKVM REST API client (login/screenshot/HID/ATX/BIOS)
+├── tools.go      # 14 MCP tool definitions
 ├── go.mod
 └── README.md
 ```

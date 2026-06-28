@@ -38,6 +38,11 @@ func registerTools(s *server.MCPServer, client *Client) {
 	registerKeyTap(s, client)
 	registerKeyHotkey(s, client)
 	registerTypeText(s, client)
+	registerATXPowerControl(s, client)
+	registerATXGetStatus(s, client)
+	registerBiosStart(s, client)
+	registerBiosStop(s, client)
+	registerBiosGetStatus(s, client)
 }
 
 // getArg 从 CallToolRequest 的 Arguments 中安全提取参数。
@@ -406,5 +411,143 @@ func registerTypeText(s *server.MCPServer, client *Client) {
 			return mcp.NewToolResultError(fmt.Sprintf("type text failed: %v", err)), nil
 		}
 		return mcp.NewToolResultText(fmt.Sprintf("Typed %d characters", len(text))), nil
+	})
+}
+
+// ============================================================================
+// atx_power_control 工具
+// ============================================================================
+
+func registerATXPowerControl(s *server.MCPServer, client *Client) {
+	tool := mcp.NewTool("blikvm_atx_power_control",
+		mcp.WithDescription("Control the remote host's ATX power. "+
+			"Actions: 'power' (power on), 'force_off' (force power off), 'reset_hard' (hard reset). "+
+			"Use this to power on, power off, or reset the remote machine."),
+		mcp.WithString("action", mcp.Required(), mcp.Description("Power action: power, force_off, or reset_hard"),
+			mcp.Enum("power", "force_off", "reset_hard")),
+	)
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		v, ok := getArg(req, "action")
+		if !ok {
+			return mcp.NewToolResultError("missing 'action'"), nil
+		}
+		action, ok := v.(string)
+		if !ok || action == "" {
+			return mcp.NewToolResultError("missing or invalid 'action'"), nil
+		}
+		if err := client.ATXPowerControl(ctx, action); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("atx power control failed: %v", err)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("ATX power action '%s' sent successfully", action)), nil
+	})
+}
+
+// ============================================================================
+// atx_get_status 工具
+// ============================================================================
+
+func registerATXGetStatus(s *server.MCPServer, client *Client) {
+	tool := mcp.NewTool("blikvm_atx_get_status",
+		mcp.WithDescription("Get the ATX power status of the remote host, "+
+			"including whether ATX is active, power LED state, and HDD LED state. "+
+			"Use this to check if the remote machine is powered on before performing other actions."),
+	)
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		status, err := client.GetATXStatus(ctx)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("get atx status failed: %v", err)), nil
+		}
+		msg := fmt.Sprintf("ATX Status: active=%v, powerLED=%v, hddLED=%v",
+			status.IsActive, status.LedPwr, status.LedHDD)
+		return mcp.NewToolResultText(msg), nil
+	})
+}
+
+// ============================================================================
+// bios_start 工具
+// ============================================================================
+
+func registerBiosStart(s *server.MCPServer, client *Client) {
+	tool := mcp.NewTool("blikvm_bios_start",
+		mcp.WithDescription("Start BIOS access mode - periodically sends a specified key to help enter BIOS setup. "+
+			"The key is sent repeatedly at the given interval until the duration expires or stopped manually. "+
+			"Common BIOS keys: F2 (most common), F1, F10, Delete, Escape. "+
+			"Default: key=F2, interval=500ms, duration=30s."),
+		mcp.WithString("key", mcp.Required(), mcp.Description("Key to send repeatedly, e.g. F2, F1, F10, Delete, Escape")),
+		mcp.WithNumber("interval", mcp.Description("Interval between key presses in milliseconds (default: 500, max: 5000)")),
+		mcp.WithNumber("duration", mcp.Description("Maximum duration in seconds before auto-stop (default: 30, max: 120)")),
+	)
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		v, ok := getArg(req, "key")
+		if !ok {
+			return mcp.NewToolResultError("missing 'key'"), nil
+		}
+		key, ok := v.(string)
+		if !ok || key == "" {
+			return mcp.NewToolResultError("missing or invalid 'key'"), nil
+		}
+
+		intervalMs := 500
+		if v, ok := getArg(req, "interval"); ok {
+			if f, ok := v.(float64); ok && f > 0 {
+				intervalMs = int(f)
+			}
+		}
+
+		durationSec := 30
+		if v, ok := getArg(req, "duration"); ok {
+			if f, ok := v.(float64); ok && f > 0 {
+				durationSec = int(f)
+			}
+		}
+
+		state, err := client.StartBiosMode(ctx, key, intervalMs, durationSec)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("start bios mode failed: %v", err)), nil
+		}
+		msg := fmt.Sprintf("BIOS mode started: key=%s, interval=%dms, remaining=%ds",
+			state.Key, state.IntervalMs, state.RemainingSec)
+		return mcp.NewToolResultText(msg), nil
+	})
+}
+
+// ============================================================================
+// bios_stop 工具
+// ============================================================================
+
+func registerBiosStop(s *server.MCPServer, client *Client) {
+	tool := mcp.NewTool("blikvm_bios_stop",
+		mcp.WithDescription("Stop BIOS access mode. "+
+			"Use this to stop the periodic key sending before the duration expires."),
+	)
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if err := client.StopBiosMode(ctx); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("stop bios mode failed: %v", err)), nil
+		}
+		return mcp.NewToolResultText("BIOS mode stopped"), nil
+	})
+}
+
+// ============================================================================
+// bios_get_status 工具
+// ============================================================================
+
+func registerBiosGetStatus(s *server.MCPServer, client *Client) {
+	tool := mcp.NewTool("blikvm_bios_get_status",
+		mcp.WithDescription("Get the current BIOS access mode status, "+
+			"including whether it is active, which key is being sent, and remaining seconds. "+
+			"Use this to check if BIOS mode is still running."),
+	)
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		state, err := client.GetBiosModeStatus(ctx)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("get bios status failed: %v", err)), nil
+		}
+		if !state.Active {
+			return mcp.NewToolResultText("BIOS mode is not active"), nil
+		}
+		msg := fmt.Sprintf("BIOS mode active: key=%s, interval=%dms, remaining=%ds",
+			state.Key, state.IntervalMs, state.RemainingSec)
+		return mcp.NewToolResultText(msg), nil
 	})
 }
